@@ -5,7 +5,7 @@ import { useRefreshMutation } from "@/features/auth/authAPI";
 
 const useAuthExpiration = () => {
   const {
-    accessToken,
+    accessToken, 
     expiresAt,
   } = useTypedSelector((state) => state.auth);
   const dispatch = useAppDispatch();
