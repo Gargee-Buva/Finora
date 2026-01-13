@@ -34,8 +34,9 @@ export const createTransactionService = async (
 ) => {
   let nextRecurringDate: Date | undefined;
   const currentDate = new Date();
+  const isRecurring = (body as any).isRecurring || false;
 
-  if (body.isRecurring && body.recurringInterval) {
+  if (isRecurring && body.recurringInterval) {
     const calculatedDate = calculateNextOccurrence(
       body.date,
       body.recurringInterval
@@ -52,7 +53,7 @@ export const createTransactionService = async (
     userId,
     category: body.category,
     amount: Number(body.amount),
-    isRecurring: body.isRecurring || false,
+    isRecurring,
     recurringInterval: body.recurringInterval || null,
     nextRecurringDate,
     lastProcessed: null,
@@ -88,8 +89,12 @@ export const getAllTransactionService = async (
   }
 
   if (type) {
-    filterConditions.type = type;
-  }
+  filterConditions.type =
+    type === "INCOME"
+      ? TransactionTypeEnum.INCOME
+      : TransactionTypeEnum.EXPENSE;
+}
+
 
   if (recurringStatus) {
     filterConditions.isRecurring = recurringStatus === "RECURRING";

@@ -30,8 +30,7 @@ transactionRoutes.post(
 transactionRoutes.post("/bulk", passportAuthenticateJwt, createMultipleTransactionsController);
 
 // ✅ bulk insert alias (backwards compatibility)
-// If you previously used /bulk-transaction, keep it as alias to insert
-transactionRoutes.post("/bulk-transaction", passportAuthenticateJwt, bulkTransactionController);
+//transactionRoutes.post("/bulk-transaction", passportAuthenticateJwt, bulkTransactionController);
 
 // ✅ bulk delete (use POST to avoid issues with DELETE + body)
 transactionRoutes.post("/bulk-delete", passportAuthenticateJwt, bulkDeleteTransactionController);

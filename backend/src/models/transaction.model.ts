@@ -131,11 +131,17 @@ const transactionSchema = new Schema<TransactionDocument>({
 );
 
 // ensure this is placed after the schema is defined, before model creation
-transactionSchema.index(
-  { userId: 1, title: 1, amount: 1, date: 1 },
-  { unique: true, name: "unique_user_title_amount_date" }
+// transactionSchema.index(
+//   { userId: 1, title: 1, amount: 1, date: 1 },
+//   { unique: true, name: "unique_user_title_amount_date" }
+// );
+
+
+// const TransactionModel = mongoose.model<TransactionDocument>("Transaction", transactionSchema);
+// export default TransactionModel;
+const TransactionModel = mongoose.model<TransactionDocument>(
+  "Transaction",
+  transactionSchema
 );
 
-
-const TransactionModel = mongoose.model<TransactionDocument>("Transaction", transactionSchema);
 export default TransactionModel;

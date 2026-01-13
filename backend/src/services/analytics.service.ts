@@ -370,6 +370,132 @@ export const chartAnalyticsService = async (
   };
 };
 
+// export const expensePieChartBreakdownService = async (
+//   userId: string,
+//   dateRangePreset?: DateRangePreset,
+//   customFrom?: Date,
+//   customTo?: Date
+// ) => {
+//   const range = getDateRange(dateRangePreset, customFrom, customTo);
+//   const { from, to, value: rangeValue } = range;
+
+//   const filter: any = {
+//     userId: new mongoose.Types.ObjectId(userId),
+//     type: TransactionTypeEnum.EXPENSE,
+//     ...(from &&
+//       to && {
+//         date: {
+//           $gte: from,
+//           $lte: to,
+//         },
+//       }),
+//   };
+
+//   const pipleline: PipelineStage[] = [
+//     {
+//       $match: filter,
+//     },
+//     {
+//       $group: {
+//         _id: "$category",
+//         value: { $sum: { $abs: "$amount" } },
+//       },
+//     },
+//     { $sort: { value: -1 } }, //
+
+//     {
+//       $facet: {
+//         topThree: [{ $limit: 3 }],
+//         others: [
+//           { $skip: 3 },
+//           {
+//             $group: {
+//               _id: "others",
+//               value: { $sum: "$value" },
+//             },
+//           },
+//         ],
+//       },
+//     },
+
+//     {
+//       $project: {
+//         categories: {
+//           $concatArrays: ["$topThree", "$others"],
+//         },
+//       },
+//     },
+
+//     { $unwind: "$categories" },
+
+//     {
+//       $group: {
+//         _id: null,
+//         totalSpent: { $sum: "$categories.value" },
+//         breakdown: { $push: "$categories" },
+//       },
+//     },
+
+//     {
+//       $project: {
+//         _id: 0,
+//         totalSpent: 1,
+//         breakdown: {
+//           // .map((cat: any)=> )
+//           $map: {
+//             input: "$breakdown",
+//             as: "cat",
+//             in: {
+//               name: "$$cat._id",
+//               value: "$$cat.value",
+//               percentage: {
+//                 $cond: [
+//                   { $eq: ["$totalSpent", 0] },
+//                   0,
+//                   {
+//                     $round: [
+//                       {
+//                         $multiply: [
+//                           { $divide: ["$$cat.value", "$totalSpent"] },
+//                           100,
+//                         ],
+//                       },
+//                       0,
+//                     ],
+//                   },
+//                 ],
+//               },
+//             },
+//           },
+//         },
+//       },
+//     },
+//   ];
+
+//   const result = await TransactionModel.aggregate(pipleline);
+
+//   const data = result[0] || {
+//     totalSpent: 0,
+//     breakdown: [],
+//   };
+//   const transformedData = {
+//     totalSpent: convertToRupees(data.totalSpent),
+//     breakdown: data.breakdown.map((item: any) => ({
+//       ...item,
+//       value: convertToRupees(item.value),
+//     })),
+//   };
+
+//   return {
+//     ...transformedData,
+//     preset: {
+//       ...range,
+//       value: rangeValue || DateRangeEnum.ALL_TIME,
+//       label: range?.label || "All Time",
+//     },
+//   };
+// };
+
 export const expensePieChartBreakdownService = async (
   userId: string,
   dateRangePreset?: DateRangePreset,
@@ -391,23 +517,33 @@ export const expensePieChartBreakdownService = async (
       }),
   };
 
-  const pipleline: PipelineStage[] = [
-    {
-      $match: filter,
-    },
+  const pipeline: PipelineStage[] = [
+    { $match: filter },
+
+    // Normalize category names
     {
       $group: {
-        _id: "$category",
+        _id: { $toLower: "$category" },
         value: { $sum: { $abs: "$amount" } },
       },
     },
-    { $sort: { value: -1 } }, //
 
+    // Separate known categories vs others
     {
       $facet: {
-        topThree: [{ $limit: 3 }],
+        known: [
+          {
+            $match: {
+              _id: { $in: ["shopping", "groceries", "utilities"] },
+            },
+          },
+        ],
         others: [
-          { $skip: 3 },
+          {
+            $match: {
+              _id: { $nin: ["shopping", "groceries", "utilities"] },
+            },
+          },
           {
             $group: {
               _id: "others",
@@ -418,35 +554,52 @@ export const expensePieChartBreakdownService = async (
       },
     },
 
+    // Merge results
     {
       $project: {
-        categories: {
-          $concatArrays: ["$topThree", "$others"],
-        },
+        breakdown: { $concatArrays: ["$known", "$others"] },
       },
     },
 
-    { $unwind: "$categories" },
+    { $unwind: "$breakdown" },
 
+    // Calculate total
     {
       $group: {
         _id: null,
-        totalSpent: { $sum: "$categories.value" },
-        breakdown: { $push: "$categories" },
+        totalSpent: { $sum: "$breakdown.value" },
+        breakdown: { $push: "$breakdown" },
       },
     },
 
+    // Final shape
     {
       $project: {
         _id: 0,
         totalSpent: 1,
         breakdown: {
-          // .map((cat: any)=> )
           $map: {
             input: "$breakdown",
             as: "cat",
             in: {
-              name: "$$cat._id",
+              name: {
+                $cond: [
+                  { $eq: ["$$cat._id", "others"] },
+                  "Others",
+                  {
+                    $concat: [
+                      { $toUpper: { $substrCP: ["$$cat._id", 0, 1] } },
+                      {
+                        $substrCP: [
+                          "$$cat._id",
+                          1,
+                          { $strLenCP: "$$cat._id" },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
               value: "$$cat.value",
               percentage: {
                 $cond: [
@@ -472,22 +625,33 @@ export const expensePieChartBreakdownService = async (
     },
   ];
 
-  const result = await TransactionModel.aggregate(pipleline);
+  const result = await TransactionModel.aggregate(pipeline);
 
   const data = result[0] || {
     totalSpent: 0,
     breakdown: [],
   };
-  const transformedData = {
+
+  // Ensure all 4 categories always exist
+  const REQUIRED = ["Shopping", "Groceries", "Utilities", "Others"];
+
+  const finalBreakdown = REQUIRED.map((name) => {
+    const found = data.breakdown.find((b: any) => b.name === name);
+    return (
+      found || {
+        name,
+        value: 0,
+        percentage: 0,
+      }
+    );
+  });
+
+  return {
     totalSpent: convertToRupees(data.totalSpent),
-    breakdown: data.breakdown.map((item: any) => ({
+    breakdown: finalBreakdown.map((item: any) => ({
       ...item,
       value: convertToRupees(item.value),
     })),
-  };
-
-  return {
-    ...transformedData,
     preset: {
       ...range,
       value: rangeValue || DateRangeEnum.ALL_TIME,
@@ -495,6 +659,7 @@ export const expensePieChartBreakdownService = async (
     },
   };
 };
+
 
 function calaulatePercentageChange(previous: number, current: number) {
   if (previous === 0) return current === 0 ? 0 : 100;

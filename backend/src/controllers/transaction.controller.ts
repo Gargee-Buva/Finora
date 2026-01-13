@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../middlewares/asyncHandler.middleware.js";
 import { HTTPSTATUS } from "../config/http.config.js";
+import { z } from "zod";
 import {
   createTransactionSchema,
   createTransactionsArraySchema,
@@ -54,33 +55,58 @@ export const createTransactionController = asyncHandler(
 /**
  * Create multiple transactions (bulk insert)
  */
+// export const createMultipleTransactionsController = asyncHandler(
+//   async (req: Request, res: Response) => {
+//     const userId = extractUserId(req);
+
+//     if (!userId) {
+//       return res
+//         .status(HTTPSTATUS.UNAUTHORIZED)
+//         .json({ message: "Unauthorized: missing user id" });
+//     }
+
+//     // Parse as array of transactions
+//     const records = createTransactionsArraySchema.parse(req.body);
+
+    
+//     const transactions = await Promise.all(
+//       records.map((record) => createTransactionService(record, userId))
+//     );
+
+ 
+
+//     return res.status(HTTPSTATUS.CREATED).json({
+//       message: "Bulk transaction inserted successfully",
+//       transactions,
+//     });
+//   }
+// );
+
 export const createMultipleTransactionsController = asyncHandler(
   async (req: Request, res: Response) => {
     const userId = extractUserId(req);
-
     if (!userId) {
-      return res
-        .status(HTTPSTATUS.UNAUTHORIZED)
-        .json({ message: "Unauthorized: missing user id" });
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Parse as array of transactions
-    const records = createTransactionsArraySchema.parse(req.body);
+    // 1️⃣ Validate entire CSV first
+    const { transactions: records } = z
+    .object({
+    transactions: createTransactionsArraySchema,
+   })
+   .parse(req.body);
 
-    // Option A: keep current approach (calls service per record)
-    const transactions = await Promise.all(
-      records.map((record) => createTransactionService(record, userId))
-    );
 
-    // Option B (recommended for large arrays): have a service method that does insertMany
-    // const transactions = await createManyTransactionsService(records, userId);
+    // 2️⃣ Only insert AFTER validation succeeds
+    const transactions = await bulkTransactionService(userId, records);
 
-    return res.status(HTTPSTATUS.CREATED).json({
-      message: "Bulk transaction inserted successfully",
-      transactions,
+    return res.status(201).json({
+      message: "Bulk transactions imported successfully",
+      insertedCount: transactions.insertedCount,
     });
   }
 );
+
 
 /**
  * Get all transactions (with filters + pagination)
@@ -104,19 +130,20 @@ export const getAllTransactionController = asyncHandler(
     if (req.query.keyword) {
       filters.keyword = String(req.query.keyword);
     }
+
+    // ✅ FIX IS HERE
     if (req.query.type) {
-      filters.type = req.query.type as keyof typeof TransactionTypeEnum;
+      filters.type = String(req.query.type).toUpperCase() as keyof typeof TransactionTypeEnum;
     }
+
     if (req.query.recurringStatus) {
-      // Accept both "NON-RECURRING" and "NON_RECURRING" from query, but convert to "NON_RECURRING"
       let status = String(req.query.recurringStatus);
       if (status === "NON-RECURRING") status = "NON_RECURRING";
       filters.recurringStatus = status as "RECURRING" | "NON_RECURRING";
     }
 
-    // normalized pagination keys: page & pageSize
     const pagination = {
-      pageSize: parseInt(String(req.query.pageSize || req.query.pageSize || "20")) || 20,
+      pageSize: parseInt(String(req.query.pageSize || "20")) || 20,
       pageNumber: parseInt(String(req.query.page || req.query.pageNumber || "1")) || 1,
     };
 
@@ -128,6 +155,7 @@ export const getAllTransactionController = asyncHandler(
     });
   }
 );
+
 
 export const getTransactionByIdController = asyncHandler(
   async (req: Request, res: Response) => {
@@ -242,8 +270,11 @@ export const bulkTransactionController = asyncHandler(
     }
 
     // Parse as array of transactions (same as createMultipleTransactionsController)
-    const records = createTransactionsArraySchema.parse(req.body);
-
+    const { transactions: records } = z
+    .object({
+        transactions: createTransactionsArraySchema,
+      })
+      .parse(req.body);
     // Use the same service as the main bulk insert endpoint
     const transactions = await Promise.all(
       records.map((record) => createTransactionService(record, userId))
